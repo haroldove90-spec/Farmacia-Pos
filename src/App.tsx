@@ -17,7 +17,11 @@ export default function App() {
 
   // Role state: null = Show initial role selector
   const [activeRole, setActiveRole] = useState<UserRole | null>(() => {
-    return (localStorage.getItem('farmacia_pos_current_role') as UserRole) || null;
+    try {
+      return (localStorage.getItem('farmacia_pos_current_role') as UserRole) || null;
+    } catch {
+      return null;
+    }
   });
 
   // Current active sub-tab for the active role
@@ -28,7 +32,9 @@ export default function App() {
   // Sync role to localStorage and set default tab
   const handleSelectRole = (role: UserRole) => {
     setActiveRole(role);
-    localStorage.setItem('farmacia_pos_current_role', role);
+    try {
+      localStorage.setItem('farmacia_pos_current_role', role);
+    } catch {}
 
     // Default tab for each role
     switch (role) {
@@ -52,7 +58,9 @@ export default function App() {
 
   const handleLogout = () => {
     setActiveRole(null);
-    localStorage.removeItem('farmacia_pos_current_role');
+    try {
+      localStorage.removeItem('farmacia_pos_current_role');
+    } catch {}
   };
 
   // Real-time counts for sidebar & bottom bar badges

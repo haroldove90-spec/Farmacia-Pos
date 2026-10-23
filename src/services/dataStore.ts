@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useSyncExternalStore } from 'react';
 import {
   Product,
   Patient,
@@ -33,59 +33,101 @@ const STORAGE_KEYS = {
   CURRENT_ROLE: 'farmacia_pos_current_role'
 };
 
+const memoryCache: Record<string, string> = {};
+
+function safeGetItem(key: string): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const val = window.localStorage.getItem(key);
+      if (val !== null) return val;
+    }
+  } catch (e) {
+    // fallback to memory cache if localStorage is partitioned or restricted
+  }
+  return memoryCache[key] ?? null;
+}
+
+function safeSetItem(key: string, val: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(key, val);
+    }
+  } catch (e) {
+    // fallback
+  }
+  memoryCache[key] = val;
+}
+
+function safeRemoveItem(key: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.removeItem(key);
+    }
+  } catch (e) {
+    // fallback
+  }
+  delete memoryCache[key];
+}
+
 const listeners = new Set<() => void>();
+let storeVersion = 0;
 
 function notifyListeners() {
+  storeVersion++;
   listeners.forEach((listener) => listener());
 }
 
 function getStored<T>(key: string, defaultVal: T): T {
   try {
-    const raw = localStorage.getItem(key);
+    const raw = safeGetItem(key);
     if (!raw) return defaultVal;
     return JSON.parse(raw);
   } catch (e) {
-    console.error('Error reading localStorage for key', key, e);
+    console.error('Error reading storage for key', key, e);
     return defaultVal;
   }
 }
 
 function setStored<T>(key: string, val: T): void {
   try {
-    localStorage.setItem(key, JSON.stringify(val));
+    safeSetItem(key, JSON.stringify(val));
     notifyListeners();
   } catch (e) {
-    console.error('Error writing localStorage for key', key, e);
+    console.error('Error writing storage for key', key, e);
   }
 }
 
 // Initial seed checker
 function isSampleDataDisabled(): boolean {
-  return localStorage.getItem(STORAGE_KEYS.NO_SAMPLE_DATA) === 'true';
+  try {
+    return safeGetItem(STORAGE_KEYS.NO_SAMPLE_DATA) === 'true';
+  } catch {
+    return false;
+  }
 }
 
 export function initDataStore() {
   const disabled = isSampleDataDisabled();
 
-  if (!localStorage.getItem(STORAGE_KEYS.PRODUCTS)) {
+  if (!safeGetItem(STORAGE_KEYS.PRODUCTS)) {
     setStored(STORAGE_KEYS.PRODUCTS, disabled ? [] : INITIAL_PRODUCTS);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.PATIENTS)) {
+  if (!safeGetItem(STORAGE_KEYS.PATIENTS)) {
     setStored(STORAGE_KEYS.PATIENTS, disabled ? [] : INITIAL_PATIENTS);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.APPOINTMENTS)) {
+  if (!safeGetItem(STORAGE_KEYS.APPOINTMENTS)) {
     setStored(STORAGE_KEYS.APPOINTMENTS, disabled ? [] : INITIAL_APPOINTMENTS);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.PRESCRIPTIONS)) {
+  if (!safeGetItem(STORAGE_KEYS.PRESCRIPTIONS)) {
     setStored(STORAGE_KEYS.PRESCRIPTIONS, disabled ? [] : INITIAL_PRESCRIPTIONS);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.CONSULTATIONS)) {
+  if (!safeGetItem(STORAGE_KEYS.CONSULTATIONS)) {
     setStored(STORAGE_KEYS.CONSULTATIONS, disabled ? [] : INITIAL_CONSULTATIONS);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.SALES)) {
+  if (!safeGetItem(STORAGE_KEYS.SALES)) {
     setStored(STORAGE_KEYS.SALES, []);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.CASH_REGISTER)) {
+  if (!safeGetItem(STORAGE_KEYS.CASH_REGISTER)) {
     const initialRegister: CashRegister = {
       id: 'reg-01',
       abierta: true,
@@ -105,10 +147,10 @@ export function initDataStore() {
     };
     setStored(STORAGE_KEYS.CASH_REGISTER, disabled ? null : initialRegister);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.PURCHASE_ORDERS)) {
+  if (!safeGetItem(STORAGE_KEYS.PURCHASE_ORDERS)) {
     setStored(STORAGE_KEYS.PURCHASE_ORDERS, []);
   }
-  if (!localStorage.getItem(STORAGE_KEYS.AUDIT_LOGS)) {
+  if (!safeGetItem(STORAGE_KEYS.AUDIT_LOGS)) {
     setStored(STORAGE_KEYS.AUDIT_LOGS, [
       {
         id: 'aud-init',
@@ -121,6 +163,9 @@ export function initDataStore() {
     ]);
   }
 }
+
+// Initialize eagerly on script evaluation
+initDataStore();
 
 // Log audit helper
 export function addAuditLog(usuario: string, rol: UserRole, accion: string, detalle: string) {
@@ -143,7 +188,7 @@ export const DataService = {
 
   clearAllSampleData(neverReload: boolean = true) {
     if (neverReload) {
-      localStorage.setItem(STORAGE_KEYS.NO_SAMPLE_DATA, 'true');
+      safeSetItem(STORAGE_KEYS.NO_SAMPLE_DATA, 'true');
     }
     setStored(STORAGE_KEYS.PRODUCTS, []);
     setStored(STORAGE_KEYS.PATIENTS, []);
@@ -163,7 +208,7 @@ export const DataService = {
   },
 
   restoreSampleData() {
-    localStorage.removeItem(STORAGE_KEYS.NO_SAMPLE_DATA);
+    safeRemoveItem(STORAGE_KEYS.NO_SAMPLE_DATA);
     setStored(STORAGE_KEYS.PRODUCTS, INITIAL_PRODUCTS);
     setStored(STORAGE_KEYS.PATIENTS, INITIAL_PATIENTS);
     setStored(STORAGE_KEYS.APPOINTMENTS, INITIAL_APPOINTMENTS);
@@ -429,18 +474,17 @@ export const DataService = {
   }
 };
 
-// React Hook to subscribe to store updates
+// React Hook to subscribe to store updates with useSyncExternalStore
 export function useDataStore() {
-  const [, setVersion] = useState(0);
-
-  useEffect(() => {
-    initDataStore();
-    const handleUpdate = () => setVersion((v) => v + 1);
-    listeners.add(handleUpdate);
-    return () => {
-      listeners.delete(handleUpdate);
-    };
-  }, []);
+  useSyncExternalStore(
+    (onStoreChange) => {
+      listeners.add(onStoreChange);
+      return () => {
+        listeners.delete(onStoreChange);
+      };
+    },
+    () => storeVersion
+  );
 
   return DataService;
 }
