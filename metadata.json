@@ -1,0 +1,6 @@
+{
+  "name": "Farmacia POS",
+  "description": "Sistema integral de punto de venta farmacéutico y gestión de consultorios médicos con expediente clínico electrónico, recetas digitales inteligentes y control de inventario.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
